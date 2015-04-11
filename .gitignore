@@ -1,0 +1,11 @@
+# UE4 folders
+*Intermediate/
+*Saved/
+*DerivedDataCache/
+*Build/
+
+# Visual Studio project files
+*.sln
+*.sdf
+*.opensdf
+*.suo
