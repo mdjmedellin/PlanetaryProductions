@@ -2,9 +2,10 @@
 
 #include "Specter.h"
 #include "SpecterCharacter.h"
+#include "SpectCharMovementComponent.h"
 
 ASpecterCharacter::ASpecterCharacter(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<USpectCharMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
@@ -39,6 +40,11 @@ ASpecterCharacter::ASpecterCharacter(const FObjectInitializer& ObjectInitializer
 
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named MyCharacter (to avoid direct content references in C++)
+
+	// Create the phase particle and attach it to the root
+	PhaseParticle = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("PhaseParticle"));
+	PhaseParticle->AttachTo(RootComponent);
+	PhaseParticle->bAutoActivate = false;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -49,6 +55,8 @@ void ASpecterCharacter::SetupPlayerInputComponent(class UInputComponent* InputCo
 	// set up gameplay key bindings
 	InputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
 	InputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
+	InputComponent->BindAction("Phase", IE_Pressed, this, &ASpecterCharacter::Phase);
+	InputComponent->BindAction("Phase", IE_Released, this, &ASpecterCharacter::StopPhasing);
 	InputComponent->BindAxis("MoveRight", this, &ASpecterCharacter::MoveRight);
 
 	InputComponent->BindTouch(IE_Pressed, this, &ASpecterCharacter::TouchStarted);
@@ -72,3 +80,40 @@ void ASpecterCharacter::TouchStopped(const ETouchIndex::Type FingerIndex, const 
 	StopJumping();
 }
 
+//JM
+void ASpecterCharacter::SetPhasingState(bool active)
+{
+	USkeletalMeshComponent* mesh = GetMesh();
+	if (active)
+	{
+		mesh->SetVisibility(false);
+		PhaseParticle->SetActive(true);
+	}
+	else
+	{
+		mesh->SetVisibility(true);
+		PhaseParticle->SetActive(false);
+	}
+}
+
+void ASpecterCharacter::Phase()
+{
+	USpectCharMovementComponent* movementComponent = Cast<USpectCharMovementComponent>(GetCharacterMovement());
+
+	if (movementComponent
+		&& movementComponent->SetGhostState(EGhostState::GS_Phasing))
+	{
+		SetPhasingState(true);
+	}
+}
+
+void ASpecterCharacter::StopPhasing()
+{
+	USpectCharMovementComponent* movementComponent = Cast<USpectCharMovementComponent>(GetCharacterMovement());
+
+	if (movementComponent
+		&& movementComponent->SetGhostState(EGhostState::GS_Specter))
+	{
+		SetPhasingState(false);
+	}
+}

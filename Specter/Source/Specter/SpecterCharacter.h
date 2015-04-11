@@ -16,6 +16,10 @@ class ASpecterCharacter : public ACharacter
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	class USpringArmComponent* CameraBoom;
 
+	/** Particle component that we use whenever we are representing the character as a phasing spectre */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Character, meta = (AllowPrivateAccess = "true"))
+	class UParticleSystemComponent* PhaseParticle;
+
 protected:
 
 	/** Called for side to side input */
@@ -31,6 +35,10 @@ protected:
 	virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
 	// End of APawn interface
 
+	//JM
+	/** Custom Abilities */
+	void Phase();
+	void StopPhasing();
 
 public:
 	ASpecterCharacter(const FObjectInitializer& ObjectInitializer);
@@ -39,4 +47,9 @@ public:
 	FORCEINLINE class UCameraComponent* GetSideViewCameraComponent() const { return SideViewCameraComponent; }
 	/** Returns CameraBoom subobject **/
 	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
+	/** Returns  PhaseParticle subobject **/
+	FORCEINLINE class UParticleSystemComponent* GetPhaseParticle() const { return PhaseParticle; }
+
+	//JM
+	void SetPhasingState(bool active = true);
 };
