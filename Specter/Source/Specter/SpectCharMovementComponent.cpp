@@ -1,10 +1,11 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Specter.h"
+#include "SpectCharMovementComponent.h"
+#include "SpecterCharacter.h"
 #include "Engine.h"
 #include "Stats2.h"
 #include "EngineStats.h"
-#include "SpectCharMovementComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/GameState.h"
 #include "GameFramework/PhysicsVolume.h"
@@ -13,55 +14,148 @@
 #include "Animation/AnimMontage.h"
 #include "PhysicsEngine/DestructibleActor.h"
 
+const float MAX_STEP_SIDE_Z = 0.08f;	// maximum z value for the normal on the vertical side of steps
+const float SWIMBOBSPEED = -80.f;
+const float VERTICAL_SLOPE_NORMAL_Z = 0.001f; // Slope is vertical if Abs(Normal.Z) <= this threshold. Accounts for precision problems that sometimes angle normals slightly off horizontal for vertical surface.
 
 USpectCharMovementComponent::USpectCharMovementComponent(const FObjectInitializer& ObjectInitializer)
 : Super(ObjectInitializer)
 {
-	m_ghostState = EGhostState::GS_StateCount;
 	MaxPhaseSpeed = 1200.f;
+	m_originalGravityScaleIsSaved = false;
+	m_originalGravityScale = 0.f;
 }
 
 void USpectCharMovementComponent::InitializeComponent()
 {
 	Super::InitializeComponent();
+}
 
-	m_ghostState = EGhostState::GS_Specter;
+bool USpectCharMovementComponent::CanSetSpecifiedGhostState(EMovementMode currentMovementMode, EGhostState currentGhostState
+	, EGhostState desiredGhostState) const
+{
+	if (currentMovementMode == MOVE_Custom)
+	{
+		if (desiredGhostState == currentGhostState)
+		{
+			return false;
+		}
+
+		//if we are in custom mode, we need to check if we can switch between specified ghost states
+		//at the moement, it is possible for us to switch between the current ghost states
+		return true;
+	}
+	else if (desiredGhostState == EGhostState::GS_Phasing)
+	{
+		ASpecterCharacter* owner = Cast<ASpecterCharacter>(GetCharacterOwner());
+		if (owner)
+		{
+			//get the input direction
+			FVector inputDirection = owner->GetInputDirection();
+
+			//from regular movement mode, we can go into phasing mode only when the player is walking or falling
+			bool validMovementMode = currentMovementMode == MOVE_Walking || currentMovementMode == MOVE_Falling;
+			bool inputDirectionValid = inputDirection.IsNearlyZero();
+			bool validSwitch = validMovementMode && !inputDirectionValid;
+
+			return validSwitch;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	return false;
+}
+
+bool USpectCharMovementComponent::CanSetSpecifiedGhostState(EGhostState desiredGhostState) const
+{
+	EGhostState currentGhostState = static_cast<EGhostState>(CustomMovementMode);
+
+	return CanSetSpecifiedGhostState(MovementMode, currentGhostState, desiredGhostState);
 }
 
 /*
 /	Attempts to switch the ghost state from previousGhostState to newGhostState
-/	@return boolean describing wether there is a viable transition between states
 */
 bool USpectCharMovementComponent::SwitchGhostState(EGhostState previousGhostState, EGhostState newGhostState)
 {
-	bool transitionIsValid = false;
-	m_ghostState = newGhostState;
+	bool canSwitchState = CanSetSpecifiedGhostState(newGhostState);
 
-	switch (previousGhostState)
+	if (canSwitchState)
+	{
+		SetMovementMode(MOVE_Custom, static_cast<uint8>(newGhostState));
+	}
+
+	return canSwitchState;
+}
+
+void USpectCharMovementComponent::SetGhostSubMovementMode(EMovementMode previousMovementMode, EGhostState previousGhostState)
+{
+	//Get input direction from owner
+	EGhostState desiredGhostState = static_cast<EGhostState>(CustomMovementMode);
+	bool canSwitchGhostState = CanSetSpecifiedGhostState(previousMovementMode, previousGhostState, desiredGhostState);
+
+	if (canSwitchGhostState)
+	{
+		switch (previousGhostState)
+		{
+		case EGhostState::GS_Phasing:
+			HandleTransitionFromPhasingState();
+			break;
+
+		case EGhostState::GS_Specter:
+			HandleTransitionFromSpecterState();
+			break;
+
+		default:
+			break;
+		}
+	}
+	else
+	{
+		//revert back to previous state
+		MovementMode = previousMovementMode;
+		CustomMovementMode = static_cast<uint8>(previousGhostState);
+	}
+}
+
+void USpectCharMovementComponent::HandleTransitionFromPhasingState()
+{
+	EGhostState desiredGhostState = static_cast<EGhostState>(CustomMovementMode);
+	
+	switch (desiredGhostState)
 	{
 	case EGhostState::GS_Specter:
-		//we were previously a specter and are switching to another state
-		if (newGhostState == EGhostState::GS_Phasing)
 		{
-			//we want to turn off collision and increment the speed of travel
-			transitionIsValid = true;
+			bForceMaxAccel = false;
+			SetMovementMode(MOVE_Falling);
 		}
 		break;
-
-	case EGhostState::GS_Phasing:
-		//we were previously phasing and are now switching to another state
-		if (newGhostState == EGhostState::GS_Specter)
-		{
-			//we want to turn on collision and decrease the speed of travel
-			transitionIsValid = true;
-		}
-		break;
-
 	default:
 		break;
 	}
+}
 
-	return transitionIsValid;
+void USpectCharMovementComponent::HandleTransitionFromSpecterState()
+{
+	EGhostState desiredGhostState = static_cast<EGhostState>(CustomMovementMode);
+
+	switch (desiredGhostState)
+	{
+	case EGhostState::GS_Phasing:
+		{
+			Velocity.Y = 0.f;
+
+			ASpecterCharacter* owner = Cast<ASpecterCharacter>(GetOwner());
+			//FVector inputDirection = owner->GetInputVector();
+			bForceMaxAccel = true;
+		}
+		break;
+	default:
+		break;
+	}
 }
 
 float USpectCharMovementComponent::GetMaxWalkSpeed() const
@@ -72,18 +166,12 @@ float USpectCharMovementComponent::GetMaxWalkSpeed() const
 	}
 	else
 	{
-		//check our ghost state
-		switch (m_ghostState)
+		if (MovementMode == MOVE_Custom)
 		{
-		case EGhostState::GS_Specter:
-			return MaxWalkSpeed;
-			break;
-
-		case EGhostState::GS_Phasing:
 			return MaxPhaseSpeed;
-			break;
-
-		default:
+		}
+		else
+		{
 			return MaxWalkSpeed;
 		}
 	}
@@ -91,22 +179,14 @@ float USpectCharMovementComponent::GetMaxWalkSpeed() const
 
 /*
 /	Function sets the new ghost state of the character
-/	If the character is already in the desired state, or it cannot go into the desired state
+/	If the character cannot go into the desired state
 /	the function will return FALSE
 /	Otherwise, the function will return TRUE
 */
-bool USpectCharMovementComponent::SetGhostState(EGhostState newGhostState)
+bool USpectCharMovementComponent::SetGhostState(EGhostState desiredGhostState)
 {
-	//check that we are not currently in the new ghost state and that it is valid
-	if (m_ghostState != newGhostState
-		&& newGhostState != EGhostState::GS_StateCount)
-	{
-		return SwitchGhostState(m_ghostState, newGhostState);
-	}
-	else
-	{
-		return false;
-	}
+	bool canSwitchGhostState = SwitchGhostState(static_cast<EGhostState>(CustomMovementMode), desiredGhostState);
+	return canSwitchGhostState;
 }
 
 float USpectCharMovementComponent::GetMaxSpeed() const
@@ -152,6 +232,11 @@ void USpectCharMovementComponent::OnMovementModeChanged(EMovementMode PreviousMo
 	}
 	else
 	{
+		if (MovementMode == MOVE_Custom)
+		{
+			SetGhostSubMovementMode(PreviousMovementMode, static_cast<EGhostState>(PreviousCustomMode));
+		}
+
 		UE_LOG(SPECTER_PLAYER, Warning, TEXT("NOT MOVE WALKING"));
 		CurrentFloor.Clear();
 		bCrouchMaintainsBaseLocation = false;
@@ -528,4 +613,39 @@ void USpectCharMovementComponent::PerformMovement(float DeltaSeconds)
 	UpdateComponentVelocity();
 
 	LastUpdateLocation = UpdatedComponent ? UpdatedComponent->GetComponentLocation() : FVector::ZeroVector;
+}
+
+void USpectCharMovementComponent::SetMovementMode(EMovementMode NewMovementMode, uint8 NewCustomMode)
+{
+	if (NewMovementMode != MOVE_Custom)
+	{
+		NewCustomMode = 0;
+	}
+
+	// Do nothing if nothing is changing.
+	if (MovementMode == NewMovementMode)
+	{
+		// Allow changes in custom sub-mode.
+		if ((NewMovementMode != MOVE_Custom) || (NewCustomMode == CustomMovementMode))
+		{
+			return;
+		}
+	}
+
+	const EMovementMode PrevMovementMode = MovementMode;
+	const uint8 PrevCustomMode = CustomMovementMode;
+
+	MovementMode = NewMovementMode;
+	CustomMovementMode = NewCustomMode;
+
+	// We allow setting movement mode before we have a component to update, in case this happens at startup.
+	if (!HasValidData())
+	{
+		return;
+	}
+
+	// Handle change in movement mode
+	OnMovementModeChanged(PrevMovementMode, PrevCustomMode);
+
+	// @todo UE4 do we need to disable ragdoll physics here? Should this function do nothing if in ragdoll?
 }

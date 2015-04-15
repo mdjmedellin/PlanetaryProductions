@@ -8,6 +8,10 @@ class ASpecterCharacter : public ACharacter
 {
 	GENERATED_BODY()
 
+	//JM
+	void SetPhasingState(bool active);
+	//===
+
 	/** Side view camera */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	class UCameraComponent* SideViewCameraComponent;
@@ -20,10 +24,14 @@ class ASpecterCharacter : public ACharacter
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Character, meta = (AllowPrivateAccess = "true"))
 	class UParticleSystemComponent* PhaseParticle;
 
+	FVector m_inputDirection;
+
 protected:
 
 	/** Called for side to side input */
 	void MoveRight(float Val);
+
+	void MoveUp(float Value);
 
 	/** Handle touch inputs. */
 	void TouchStarted(const ETouchIndex::Type FingerIndex, const FVector Location);
@@ -50,6 +58,5 @@ public:
 	/** Returns  PhaseParticle subobject **/
 	FORCEINLINE class UParticleSystemComponent* GetPhaseParticle() const { return PhaseParticle; }
 
-	//JM
-	void SetPhasingState(bool active = true);
+	FVector GetInputDirection() const;
 };
